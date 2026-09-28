@@ -2976,13 +2976,12 @@ elif selected_page == "🌐 Network Rebalancing & Transfers":
 
     # ── Part C: SKU Risk Portfolio & Network Balance per Warehouse ───────────
     st.markdown("<div style='font-size:14px; font-weight:700; color:#38bdf8; margin: 20px 0 8px;'>🏢 Part C: Warehouse SKU Risk Profile & Network Health</div>", unsafe_allow_html=True)
-    st.caption("Distribution of active pharmaceutical SKUs by operational status across warehouses, with median runway per facility.")
+    st.caption("Distribution of active pharmaceutical SKUs by operational status across warehouses.")
 
     wh_summary = geo.groupby("warehouse_id").agg(
         total_skus=("product_id", "nunique"),
         hot_count=("location_type", lambda s: (s == "🔥 HOT").sum()),
         cold_count=("location_type", lambda s: (s == "❄️ COLD").sum()),
-        median_dos=("days_of_stock", lambda s: s[s < 999].median() if (s < 999).any() else 0),
         total_val=("stock_value", "sum"),
     ).reset_index().sort_values("warehouse_id")
     wh_summary["balanced_count"] = (wh_summary["total_skus"] - wh_summary["hot_count"] - wh_summary["cold_count"]).clip(lower=0)
@@ -3008,13 +3007,14 @@ elif selected_page == "🌐 Network Rebalancing & Transfers":
     ax_m.grid(True, axis="y", alpha=0.15, linestyle="--")
     for sp in ax_m.spines.values(): sp.set_color("#334155")
 
+    max_sku_total = max(wh_summary["total_skus"]) if len(wh_summary) > 0 and max(wh_summary["total_skus"]) > 0 else 10
+
     # In-bar number annotations (only if count > 0)
     for idx_w in range(len(wh_summary)):
         h_val = wh_summary["hot_count"].iloc[idx_w]
         b_val = wh_summary["balanced_count"].iloc[idx_w]
         c_val = wh_summary["cold_count"].iloc[idx_w]
         tot_val = wh_summary["total_skus"].iloc[idx_w]
-        med_d = wh_summary["median_dos"].iloc[idx_w]
 
         if h_val > 0:
             ax_m.text(idx_w, h_val / 2, f"{int(h_val)}", ha="center", va="center", color="#ffffff", fontsize=8.5, fontweight="bold")
@@ -3023,19 +3023,10 @@ elif selected_page == "🌐 Network Rebalancing & Transfers":
         if c_val > 0:
             ax_m.text(idx_w, h_val + b_val + c_val / 2, f"{int(c_val)}", ha="center", va="center", color="#0f172a", fontsize=8.5, fontweight="bold")
 
-        # Top badge: Median SKU Runway
-        badge_col = "#ef4444" if med_d < 30 else ("#38bdf8" if med_d > 120 else "#10b981")
-        max_sku_y = max(wh_summary["total_skus"]) if len(wh_summary) > 0 and max(wh_summary["total_skus"]) > 0 else 10
-        ax_m.annotate(
-            f"Median: {med_d:.0f}d",
-            xy=(idx_w, tot_val),
-            xytext=(idx_w, tot_val + max_sku_y * 0.05),
-            ha="center", fontsize=8.5, fontweight="bold", color=badge_col,
-            bbox=dict(boxstyle="round,pad=0.25", fc="#0f172a", ec=badge_col, alpha=0.85)
-        )
+        # Top total label
+        ax_m.text(idx_w, tot_val + max_sku_total * 0.02, f"{int(tot_val)} SKUs", ha="center", va="bottom", color="#cbd5e1", fontsize=8.5, fontweight="bold")
 
-    max_sku_total = max(wh_summary["total_skus"]) if len(wh_summary) > 0 and max(wh_summary["total_skus"]) > 0 else 10
-    ax_m.set_ylim(0, max_sku_total * 1.22)
+    ax_m.set_ylim(0, max_sku_total * 1.18)
     plt.tight_layout()
     show_fig(fig_m)
 
@@ -3050,9 +3041,8 @@ elif selected_page == "🌐 Network Rebalancing & Transfers":
         return "⚖️ Balanced Node"
     tbl_wh["Role"] = tbl_wh.apply(_wh_role, axis=1)
     tbl_wh["total_val"] = tbl_wh["total_val"].map(lambda x: fmt_curr(x, compact=True))
-    tbl_wh["median_dos"] = tbl_wh["median_dos"].map(lambda x: f"{x:.0f} days")
-    tbl_wh = tbl_wh[["warehouse_id", "total_skus", "hot_count", "cold_count", "balanced_count", "median_dos", "total_val", "Role"]]
-    tbl_wh.columns = ["Warehouse", "Total SKUs", "🔥 Stockout Risks (<30d)", "❄️ Capital Traps (>120d)", "✅ Balanced SKUs", "Median Runway", "Inventory Value", "Network Role"]
+    tbl_wh = tbl_wh[["warehouse_id", "total_skus", "hot_count", "cold_count", "balanced_count", "total_val", "Role"]]
+    tbl_wh.columns = ["Warehouse", "Total SKUs", "🔥 Stockout Risks (<30d)", "❄️ Capital Traps (>120d)", "✅ Balanced SKUs", "Inventory Value", "Network Role"]
     st.dataframe(tbl_wh, use_container_width=True, hide_index=True)
 
     st.markdown("---")
