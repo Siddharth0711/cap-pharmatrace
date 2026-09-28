@@ -2974,59 +2974,85 @@ elif selected_page == "🌐 Network Rebalancing & Transfers":
     plt.tight_layout()
     show_fig(fig_sc)
 
-    # ── Part C: Macro Network Balance ─────────────────────────────────────────
-    st.markdown("<div style='font-size:14px; font-weight:700; color:#38bdf8; margin: 20px 0 8px;'>🏢 Part C: Network Warehouse Balance (Macro Overview)</div>", unsafe_allow_html=True)
+    # ── Part C: SKU Risk Portfolio & Network Balance per Warehouse ───────────
+    st.markdown("<div style='font-size:14px; font-weight:700; color:#38bdf8; margin: 20px 0 8px;'>🏢 Part C: Warehouse SKU Risk Profile & Network Health</div>", unsafe_allow_html=True)
+    st.caption("Distribution of active pharmaceutical SKUs by operational status across warehouses, with median runway per facility.")
+
     wh_summary = geo.groupby("warehouse_id").agg(
-        total_demand=("avg_monthly_demand", "sum"),
-        total_stock=("stock_on_hand", "sum"),
-        total_val=("stock_value", "sum"),
+        total_skus=("product_id", "nunique"),
         hot_count=("location_type", lambda s: (s == "🔥 HOT").sum()),
         cold_count=("location_type", lambda s: (s == "❄️ COLD").sum()),
+        median_dos=("days_of_stock", lambda s: s[s < 999].median() if (s < 999).any() else 0),
+        total_val=("stock_value", "sum"),
     ).reset_index().sort_values("warehouse_id")
-    wh_summary["dos"] = (wh_summary["total_stock"] / (wh_summary["total_demand"] / 30.0).clip(lower=1)).round(1)
+    wh_summary["balanced_count"] = (wh_summary["total_skus"] - wh_summary["hot_count"] - wh_summary["cold_count"]).clip(lower=0)
 
-    # Plot Macro Bar Chart
+    # Plot Stacked Bar Chart of SKU Risk Distribution per Warehouse
     fig_m, ax_m = plt.subplots(figsize=(12, 5.2))
     fig_m.patch.set_facecolor("#0f1117")
     ax_m.set_facecolor("#131722")
 
     x_idx = np.arange(len(wh_summary))
-    b_width = 0.38
+    b_width = 0.52
 
-    bars1 = ax_m.bar(x_idx - b_width/2, wh_summary["total_demand"], width=b_width, color="#00d4ff", alpha=0.85, label="Total Monthly Demand (Units)")
-    bars2 = ax_m.bar(x_idx + b_width/2, wh_summary["total_stock"], width=b_width, color="#7c3aed", alpha=0.85, label="Total Stock on Hand (Units)")
+    # Stacked bars: HOT on bottom (red), Balanced in middle (green), COLD on top (blue)
+    bars_hot = ax_m.bar(x_idx, wh_summary["hot_count"], width=b_width, color="#ef4444", alpha=0.9, label="🔥 Stockout Exposure SKUs (<30d)")
+    bars_bal = ax_m.bar(x_idx, wh_summary["balanced_count"], bottom=wh_summary["hot_count"], width=b_width, color="#10b981", alpha=0.85, label="✅ Balanced Operating SKUs (30–120d)")
+    bars_cold = ax_m.bar(x_idx, wh_summary["cold_count"], bottom=wh_summary["hot_count"] + wh_summary["balanced_count"], width=b_width, color="#38bdf8", alpha=0.85, label="❄️ Trapped Capital SKUs (>120d)")
 
     ax_m.set_xticks(x_idx)
     ax_m.set_xticklabels(wh_summary["warehouse_id"], color="#cbd5e1", fontsize=10, fontweight="bold")
-    ax_m.set_ylabel("Units", color="#cbd5e1", fontsize=10, fontweight="bold")
-    ax_m.set_title("Network Warehouse Balance: Monthly Demand vs Stock on Hand", color="#00d4ff", fontsize=12, fontweight="bold", pad=12)
-    ax_m.legend(loc="upper right", fontsize=9, framealpha=0.35, facecolor="#0f172a", edgecolor="#334155", labelcolor="#e2e8f0")
+    ax_m.set_ylabel("Number of Pharmaceutical SKUs", color="#cbd5e1", fontsize=10, fontweight="bold")
+    ax_m.set_title("Warehouse Portfolio Health: Active SKU Risk Breakdown", color="#00d4ff", fontsize=12, fontweight="bold", pad=12)
+    ax_m.legend(loc="upper right", fontsize=8.5, framealpha=0.35, facecolor="#0f172a", edgecolor="#334155", labelcolor="#e2e8f0")
     ax_m.grid(True, axis="y", alpha=0.15, linestyle="--")
     for sp in ax_m.spines.values(): sp.set_color("#334155")
 
-    # Annotate coverage days above bars
-    for idx_w, dos_v in enumerate(wh_summary["dos"]):
-        badge_color = "#ef4444" if dos_v < 30 else ("#38bdf8" if dos_v > 120 else "#10b981")
-        max_y = max(wh_summary["total_demand"].iloc[idx_w], wh_summary["total_stock"].iloc[idx_w])
+    # In-bar number annotations (only if count > 0)
+    for idx_w in range(len(wh_summary)):
+        h_val = wh_summary["hot_count"].iloc[idx_w]
+        b_val = wh_summary["balanced_count"].iloc[idx_w]
+        c_val = wh_summary["cold_count"].iloc[idx_w]
+        tot_val = wh_summary["total_skus"].iloc[idx_w]
+        med_d = wh_summary["median_dos"].iloc[idx_w]
+
+        if h_val > 0:
+            ax_m.text(idx_w, h_val / 2, f"{int(h_val)}", ha="center", va="center", color="#ffffff", fontsize=8.5, fontweight="bold")
+        if b_val > 0:
+            ax_m.text(idx_w, h_val + b_val / 2, f"{int(b_val)}", ha="center", va="center", color="#ffffff", fontsize=8.5, fontweight="bold")
+        if c_val > 0:
+            ax_m.text(idx_w, h_val + b_val + c_val / 2, f"{int(c_val)}", ha="center", va="center", color="#0f172a", fontsize=8.5, fontweight="bold")
+
+        # Top badge: Median SKU Runway
+        badge_col = "#ef4444" if med_d < 30 else ("#38bdf8" if med_d > 120 else "#10b981")
+        max_sku_y = max(wh_summary["total_skus"]) if len(wh_summary) > 0 and max(wh_summary["total_skus"]) > 0 else 10
         ax_m.annotate(
-            f"{dos_v:.0f}d coverage",
-            xy=(idx_w, max_y),
-            xytext=(idx_w, max_y + max_y * 0.04),
-            ha="center", fontsize=8.5, fontweight="bold", color=badge_color,
-            bbox=dict(boxstyle="round,pad=0.25", fc="#0f172a", ec=badge_color, alpha=0.8)
+            f"Median: {med_d:.0f}d",
+            xy=(idx_w, tot_val),
+            xytext=(idx_w, tot_val + max_sku_y * 0.05),
+            ha="center", fontsize=8.5, fontweight="bold", color=badge_col,
+            bbox=dict(boxstyle="round,pad=0.25", fc="#0f172a", ec=badge_col, alpha=0.85)
         )
 
+    max_sku_total = max(wh_summary["total_skus"]) if len(wh_summary) > 0 and max(wh_summary["total_skus"]) > 0 else 10
+    ax_m.set_ylim(0, max_sku_total * 1.22)
     plt.tight_layout()
     show_fig(fig_m)
 
-    # Macro warehouse data table
-    st.markdown("<div style='font-size:12px; font-weight:700; color:#94a3b8; margin-top:8px;'>📋 Warehouse Network Balance Summary Table:</div>", unsafe_allow_html=True)
+    # Warehouse Intelligence Table
+    st.markdown("<div style='font-size:12px; font-weight:700; color:#94a3b8; margin-top:8px;'>📋 Facility Inventory Health & Transfer Strategy Matrix:</div>", unsafe_allow_html=True)
     tbl_wh = wh_summary.copy()
-    tbl_wh["total_demand"] = tbl_wh["total_demand"].map(lambda x: f"{x:,.0f} u")
-    tbl_wh["total_stock"]  = tbl_wh["total_stock"].map(lambda x: f"{x:,.0f} u")
-    tbl_wh["total_val"]    = tbl_wh["total_val"].map(lambda x: fmt_curr(x, compact=True))
-    tbl_wh["dos"]          = tbl_wh["dos"].map(lambda x: f"{x:.0f} days")
-    tbl_wh.columns = ["Warehouse", "Monthly Demand", "Stock on Hand", "Inventory Value", "HOT Deficits", "COLD Surpluses", "Stock Runway"]
+    def _wh_role(row):
+        if row["hot_count"] > row["cold_count"] and row["hot_count"] >= 2:
+            return "📥 Net Recipient (Inbound Urgent)"
+        elif row["cold_count"] > row["hot_count"] and row["cold_count"] >= 2:
+            return "📤 Net Donor (Outbound Surplus)"
+        return "⚖️ Balanced Node"
+    tbl_wh["Role"] = tbl_wh.apply(_wh_role, axis=1)
+    tbl_wh["total_val"] = tbl_wh["total_val"].map(lambda x: fmt_curr(x, compact=True))
+    tbl_wh["median_dos"] = tbl_wh["median_dos"].map(lambda x: f"{x:.0f} days")
+    tbl_wh = tbl_wh[["warehouse_id", "total_skus", "hot_count", "cold_count", "balanced_count", "median_dos", "total_val", "Role"]]
+    tbl_wh.columns = ["Warehouse", "Total SKUs", "🔥 Stockout Risks (<30d)", "❄️ Capital Traps (>120d)", "✅ Balanced SKUs", "Median Runway", "Inventory Value", "Network Role"]
     st.dataframe(tbl_wh, use_container_width=True, hide_index=True)
 
     st.markdown("---")
