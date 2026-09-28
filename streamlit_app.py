@@ -2769,46 +2769,270 @@ elif selected_page == "🌐 Network Rebalancing & Transfers":
     nk4.metric("💰 Transfer Net Savings", fmt_curr(tot_sav, compact=False, decimals=0), help=f"Total {curr_code} saved by rebalancing inventory across warehouses vs CMO manufacturing")
     st.markdown("---")
 
-    # ── SECTION 1: GEOGRAPHIC DEMAND & INVENTORY HEATMAPS ────────────────────
+    # ── SECTION 1: GEOGRAPHIC DEMAND & INVENTORY VISUAL INTELLIGENCE ─────────
     st.markdown('<div class="section-header">🗺️ 1. Geographic Demand & Stock Distribution</div>', unsafe_allow_html=True)
-    fig_g, axes_g = plt.subplots(1, 3, figsize=(24, 7))
-    fig_g.patch.set_facecolor("#0f1117")
+    st.markdown(
+        "<div style='color:#94a3b8; font-size:12.5px; margin-top:-8px; margin-bottom:14px;'>"
+        "Multi-echelon inventory intelligence across warehouses: isolate critical stockout deficits (HOT), "
+        "identify trapped working capital (COLD), and inspect demand vs stock runway.</div>",
+        unsafe_allow_html=True
+    )
 
-    # Panel 1: Demand Heatmap
-    ax1 = axes_g[0]
-    pivot_dem = geo.pivot_table(index="product_name", columns="warehouse_id", values="avg_monthly_demand", aggfunc="sum", fill_value=0)
-    if not pivot_dem.empty:
-        vmax = pivot_dem.values.max()
-        im1 = ax1.imshow(pivot_dem.values, cmap="RdYlGn_r", aspect="auto", vmin=0, vmax=vmax if vmax>0 else 1)
-        ax1.set_xticks(range(len(pivot_dem.columns))); ax1.set_xticklabels(pivot_dem.columns, rotation=45, ha="right", fontsize=9)
-        ax1.set_yticks(range(len(pivot_dem.index))); ax1.set_yticklabels([n[:18] for n in pivot_dem.index], fontsize=8)
-        ax1.set_title("Avg Monthly Demand (Units)", color="#00d4ff", fontweight="bold")
-        plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+    tab_hm, tab_quad, tab_macro = st.tabs([
+        "📊 SKU × Warehouse Heatmaps (Demand & Stock Runway)",
+        "🎯 Demand vs Stock Coverage Quadrant Matrix",
+        "🏢 Network Warehouse Balance (Macro Overview)",
+    ])
 
-    # Panel 2: Days of Stock Heatmap
-    ax2 = axes_g[1]
-    pivot_stk = geo.pivot_table(index="product_name", columns="warehouse_id", values="days_of_stock", aggfunc="mean", fill_value=0).clip(upper=200)
-    if not pivot_stk.empty:
-        im2 = ax2.imshow(pivot_stk.values, cmap="RdYlGn", aspect="auto", vmin=0, vmax=200)
-        ax2.set_xticks(range(len(pivot_stk.columns))); ax2.set_xticklabels(pivot_stk.columns, rotation=45, ha="right", fontsize=9)
-        ax2.set_yticks(range(len(pivot_stk.index))); ax2.set_yticklabels([n[:18] for n in pivot_stk.index], fontsize=8)
-        ax2.set_title("Days of Stock (Ample vs Low)", color="#00d4ff", fontweight="bold")
-        plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+    with tab_hm:
+        # Dynamic filter bar
+        fc1, fc2, fc3 = st.columns([2.6, 1.8, 1.4])
+        with fc1:
+            hm_filter = st.selectbox(
+                "Filter SKUs by Strategic Risk Profile:",
+                [
+                    "🔥 Critical Stockout Exposure (HOT Priority First)",
+                    "❄️ Trapped Capital Surpluses (COLD Priority First)",
+                    "📈 High-Velocity Drivers (Highest Total Demand)",
+                    "🌐 Top Active Portfolio SKUs (Volume Sorted)",
+                ],
+                index=0,
+                key="geo_hm_filter"
+            )
+        with fc2:
+            hm_top_n = st.slider(
+                "Number of SKUs to Display:",
+                min_value=5, max_value=25, value=12, step=1,
+                key="geo_hm_top_n",
+                help="Limits row density to maintain large, crisp fonts and ample row breathing room"
+            )
+        with fc3:
+            hm_show_nums = st.toggle("Show Numbers in Cells", value=True, key="geo_hm_show_nums")
 
-    # Panel 3: HOT / COLD Scatter
-    ax3 = axes_g[2]
-    ax3.set_facecolor("#1a1d27")
-    for ltype, color, marker in [("🔥 HOT","#ef4444","^"),("❄️ COLD","#3b82f6","v"),("✅ BALANCED","#10b981","o")]:
-        sub = geo[geo.location_type==ltype]
-        if not sub.empty:
-            ax3.scatter(sub.avg_monthly_demand, sub.days_of_stock.clip(upper=200), c=color, marker=marker, s=80, alpha=0.8, label=ltype)
-    ax3.axhline(30, color="#ef4444", lw=1.5, linestyle="--", alpha=0.6, label="30d Stock Floor")
-    ax3.axhline(120, color="#3b82f6", lw=1.5, linestyle="--", alpha=0.6, label="120d Surplus")
-    ax3.set_xlabel("Avg Monthly Demand (units)", color="#ccc"); ax3.set_ylabel("Days of Stock", color="#ccc")
-    ax3.set_title("Demand vs Stock Coverage", color="#00d4ff", fontweight="bold")
-    ax3.legend(fontsize=8, framealpha=0.2); ax3.grid(True, alpha=0.2)
-    plt.tight_layout()
-    show_fig(fig_g)
+        # Determine ranked SKUs
+        if "🔥 Critical Stockout" in hm_filter:
+            p_rank = geo.groupby("product_name").agg(
+                hot_count=("location_type", lambda s: (s == "🔥 HOT").sum()),
+                min_dos=("days_of_stock", "min"),
+                tot_dem=("avg_monthly_demand", "sum")
+            ).sort_values(by=["hot_count", "min_dos", "tot_dem"], ascending=[False, True, False])
+            disp_prods = p_rank.head(hm_top_n).index.tolist()
+        elif "❄️ Trapped Capital" in hm_filter:
+            p_rank = geo.groupby("product_name").agg(
+                cold_count=("location_type", lambda s: (s == "❄️ COLD").sum()),
+                max_dos=("days_of_stock", "max"),
+                tot_val=("stock_value", "sum")
+            ).sort_values(by=["cold_count", "max_dos", "tot_val"], ascending=[False, False, False])
+            disp_prods = p_rank.head(hm_top_n).index.tolist()
+        elif "📈 High-Velocity" in hm_filter:
+            p_rank = geo.groupby("product_name")["avg_monthly_demand"].sum().sort_values(ascending=False)
+            disp_prods = p_rank.head(hm_top_n).index.tolist()
+        else:
+            p_rank = geo.groupby("product_name")["avg_monthly_demand"].sum().sort_values(ascending=False)
+            disp_prods = p_rank.head(hm_top_n).index.tolist()
+
+        geo_hm = geo[geo["product_name"].isin(disp_prods)]
+        piv_d = geo_hm.pivot_table(index="product_name", columns="warehouse_id", values="avg_monthly_demand", aggfunc="sum", fill_value=0)
+        piv_s = geo_hm.pivot_table(index="product_name", columns="warehouse_id", values="days_of_stock", aggfunc="mean", fill_value=0).clip(upper=250)
+
+        # Preserve sort order
+        ordered_idx = [p for p in disp_prods if p in piv_d.index]
+        piv_d = piv_d.reindex(ordered_idx)
+        piv_s = piv_s.reindex(ordered_idx)
+
+        # Plot side-by-side heatmaps with ample height
+        hm_height = max(5.0, len(piv_d) * 0.44 + 1.2)
+        col_hm1, col_hm2 = st.columns(2)
+
+        with col_hm1:
+            fig_h1, ax_h1 = plt.subplots(figsize=(7.5, hm_height))
+            fig_h1.patch.set_facecolor("#0f1117")
+            ax_h1.set_facecolor("#0f1117")
+            vmax_d = piv_d.values.max() if len(piv_d) > 0 else 1
+            im_d = ax_h1.imshow(piv_d.values, cmap="YlGnBu", aspect="auto", vmin=0, vmax=max(vmax_d, 1))
+            ax_h1.set_xticks(range(len(piv_d.columns)))
+            ax_h1.set_xticklabels(piv_d.columns, color="#94a3b8", fontsize=9.5, fontweight="bold", rotation=25, ha="right")
+            ax_h1.set_yticks(range(len(piv_d.index)))
+            ax_h1.set_yticklabels([str(n)[:22] for n in piv_d.index], color="#f1f5f9", fontsize=9.5, fontweight="semibold")
+            ax_h1.set_title("Avg Monthly Demand (Units / Month)", color="#00d4ff", fontsize=11, fontweight="bold", pad=12)
+
+            if hm_show_nums:
+                for r_i in range(len(piv_d.index)):
+                    for c_j in range(len(piv_d.columns)):
+                        v_ij = piv_d.values[r_i, c_j]
+                        txt_col = "#000000" if v_ij > vmax_d * 0.55 else "#ffffff"
+                        val_str = f"{v_ij:,.0f}" if v_ij >= 10 else (f"{v_ij:.0f}" if v_ij > 0 else "—")
+                        ax_h1.text(c_j, r_i, val_str, ha="center", va="center", color=txt_col, fontsize=8, fontweight="bold")
+
+            for sp in ax_h1.spines.values(): sp.set_color("#334155")
+            cb1 = fig_h1.colorbar(im_d, ax=ax_h1, fraction=0.046, pad=0.04)
+            cb1.ax.tick_params(colors="#94a3b8", labelsize=8)
+            cb1.outline.set_edgecolor("#334155")
+            plt.tight_layout()
+            show_fig(fig_h1)
+
+        with col_hm2:
+            fig_h2, ax_h2 = plt.subplots(figsize=(7.5, hm_height))
+            fig_h2.patch.set_facecolor("#0f1117")
+            ax_h2.set_facecolor("#0f1117")
+            im_s = ax_h2.imshow(piv_s.values, cmap="RdYlGn", aspect="auto", vmin=0, vmax=150)
+            ax_h2.set_xticks(range(len(piv_s.columns)))
+            ax_h2.set_xticklabels(piv_s.columns, color="#94a3b8", fontsize=9.5, fontweight="bold", rotation=25, ha="right")
+            ax_h2.set_yticks(range(len(piv_s.index)))
+            ax_h2.set_yticklabels([str(n)[:22] for n in piv_s.index], color="#f1f5f9", fontsize=9.5, fontweight="semibold")
+            ax_h2.set_title("Days of Stock Runway (Coverage)", color="#00d4ff", fontsize=11, fontweight="bold", pad=12)
+
+            if hm_show_nums:
+                for r_i in range(len(piv_s.index)):
+                    for c_j in range(len(piv_s.columns)):
+                        v_s = piv_s.values[r_i, c_j]
+                        txt_col = "#ffffff" if v_s < 45 or v_s > 115 else "#000000"
+                        dos_str = f"{v_s:.0f}d" if v_s < 200 else ">200d"
+                        ax_h2.text(c_j, r_i, dos_str, ha="center", va="center", color=txt_col, fontsize=8, fontweight="bold")
+
+            for sp in ax_h2.spines.values(): sp.set_color("#334155")
+            cb2 = fig_h2.colorbar(im_s, ax=ax_h2, fraction=0.046, pad=0.04)
+            cb2.ax.tick_params(colors="#94a3b8", labelsize=8)
+            cb2.outline.set_edgecolor("#334155")
+            plt.tight_layout()
+            show_fig(fig_h2)
+
+        # Strategic Color Key
+        st.markdown("""
+        <div style='background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:10px 16px; margin-top:8px; font-size:12px; display:flex; justify-content:space-around; align-items:center; flex-wrap:wrap; gap:8px;'>
+          <span><b style='color:#ef4444;'>🔴 Critical Deficit (&lt;30d)</b>: Stockout hazard — Immediate inbound transfer needed</span>
+          <span><b style='color:#f59e0b;'>🟡 Lean Buffer (30–60d)</b>: Approaching safety limit — Monitor replenishment</span>
+          <span><b style='color:#10b981;'>🟢 Optimal Operating Zone (60–120d)</b>: Healthy FEFO buffer</span>
+          <span><b style='color:#38bdf8;'>🔵 Surplus Capital Trap (&gt;120d)</b>: Excess holding — Prime donor for outbound transfer</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with tab_quad:
+        # Dedicated Full-Width Quadrant Scatter Plot
+        fig_sc, ax_sc = plt.subplots(figsize=(13, 6.2))
+        fig_sc.patch.set_facecolor("#0f1117")
+        ax_sc.set_facecolor("#131722")
+
+        max_dem = max(geo["avg_monthly_demand"].max() * 1.05, 100)
+        max_dos = 205
+        med_dem = geo["avg_monthly_demand"].median()
+
+        # Shaded risk zones
+        ax_sc.fill_between([med_dem, max_dem], 0, 30, color="#ef4444", alpha=0.10)
+        ax_sc.fill_between([0, med_dem], 120, max_dos, color="#38bdf8", alpha=0.10)
+        ax_sc.fill_between([0, max_dem], 30, 120, color="#10b981", alpha=0.06)
+
+        # Threshold lines
+        ax_sc.axhline(30, color="#ef4444", lw=1.6, linestyle="--", alpha=0.8, label="30d Stock Floor (Stockout Danger)")
+        ax_sc.axhline(120, color="#38bdf8", lw=1.6, linestyle="--", alpha=0.8, label="120d Surplus Ceiling (Capital Trap)")
+        ax_sc.axvline(med_dem, color="#64748b", lw=1.2, linestyle=":", alpha=0.6, label=f"Median Demand ({med_dem:,.0f}u)")
+
+        # Scatter points
+        for ltype, color, marker, lbl in [
+            ("🔥 HOT", "#ef4444", "^", f"HOT Stockout Exposure (n={len(hot)})"),
+            ("❄️ COLD", "#38bdf8", "v", f"COLD Capital Trap (n={len(cold)})"),
+            ("✅ BALANCED", "#10b981", "o", f"Balanced Inventory (n={len(geo) - len(hot) - len(cold)})")
+        ]:
+            sub_pts = geo[geo["location_type"] == ltype]
+            if not sub_pts.empty:
+                ax_sc.scatter(
+                    sub_pts["avg_monthly_demand"], sub_pts["days_of_stock"].clip(upper=200),
+                    c=color, marker=marker, s=85, alpha=0.85, edgecolors="#ffffff25", label=lbl
+                )
+
+        # Outlier Callouts
+        hot_outs = geo[geo["location_type"] == "🔥 HOT"].sort_values("avg_monthly_demand", ascending=False).head(3)
+        for _, row in hot_outs.iterrows():
+            ax_sc.annotate(
+                f"{str(row['product_name'])[:15]}\n({row['warehouse_id']}: {int(row['days_of_stock'])}d)",
+                xy=(row["avg_monthly_demand"], min(row["days_of_stock"], 200)),
+                xytext=(max(row["avg_monthly_demand"] - 45, 10), min(row["days_of_stock"], 200) + 16),
+                bbox=dict(boxstyle="round,pad=0.3", fc="#2a1010", ec="#ef4444", alpha=0.9),
+                arrowprops=dict(arrowstyle="->", color="#ef4444", lw=1.2),
+                fontsize=7.5, color="#fca5a5", fontweight="bold"
+            )
+
+        cold_outs = geo[geo["location_type"] == "❄️ COLD"].sort_values("days_of_stock", ascending=False).head(3)
+        for _, row in cold_outs.iterrows():
+            ax_sc.annotate(
+                f"{str(row['product_name'])[:15]}\n({row['warehouse_id']}: {int(min(row['days_of_stock'], 200))}d)",
+                xy=(row["avg_monthly_demand"], min(row["days_of_stock"], 200)),
+                xytext=(row["avg_monthly_demand"] + 20, min(row["days_of_stock"], 200) - 18),
+                bbox=dict(boxstyle="round,pad=0.3", fc="#0d2138", ec="#38bdf8", alpha=0.9),
+                arrowprops=dict(arrowstyle="->", color="#38bdf8", lw=1.2),
+                fontsize=7.5, color="#7dd3fc", fontweight="bold"
+            )
+
+        # Zone watermark labels
+        ax_sc.text(max_dem * 0.72, 10, "HIGH DEMAND / DEFICIT (HOT RISK)", color="#ef444466", fontsize=9, fontweight="bold")
+        ax_sc.text(10, 185, "SURPLUS / CAPITAL TRAP (COLD)", color="#38bdf866", fontsize=9, fontweight="bold")
+        ax_sc.text(10, 70, "BALANCED ZONE (30–120 DAYS)", color="#10b98155", fontsize=9, fontweight="bold")
+
+        ax_sc.set_xlabel("Average Monthly Demand (Units / Month)", color="#cbd5e1", fontsize=10, fontweight="bold")
+        ax_sc.set_ylabel("Days of Stock (DOS Runway)", color="#cbd5e1", fontsize=10, fontweight="bold")
+        ax_sc.set_title("Network SKU Demand vs Stock Runway Quadrant Matrix", color="#00d4ff", fontsize=12, fontweight="bold", pad=12)
+        ax_sc.set_ylim(-8, 210)
+        ax_sc.set_xlim(-5, max_dem)
+        ax_sc.legend(loc="upper right", fontsize=8.5, framealpha=0.35, facecolor="#0f172a", edgecolor="#334155", labelcolor="#e2e8f0")
+        ax_sc.grid(True, alpha=0.15, linestyle="--")
+        for sp in ax_sc.spines.values(): sp.set_color("#334155")
+        plt.tight_layout()
+        show_fig(fig_sc)
+
+    with tab_macro:
+        # Macro Network Warehouse Balance Overview
+        wh_summary = geo.groupby("warehouse_id").agg(
+            total_demand=("avg_monthly_demand", "sum"),
+            total_stock=("stock_on_hand", "sum"),
+            total_val=("stock_value", "sum"),
+            hot_count=("location_type", lambda s: (s == "🔥 HOT").sum()),
+            cold_count=("location_type", lambda s: (s == "❄️ COLD").sum()),
+        ).reset_index().sort_values("warehouse_id")
+        wh_summary["dos"] = (wh_summary["total_stock"] / (wh_summary["total_demand"] / 30.0).clip(lower=1)).round(1)
+
+        # Plot Macro Bar Chart
+        fig_m, ax_m = plt.subplots(figsize=(12, 5.2))
+        fig_m.patch.set_facecolor("#0f1117")
+        ax_m.set_facecolor("#131722")
+
+        x_idx = np.arange(len(wh_summary))
+        b_width = 0.38
+
+        bars1 = ax_m.bar(x_idx - b_width/2, wh_summary["total_demand"], width=b_width, color="#00d4ff", alpha=0.85, label="Total Monthly Demand (Units)")
+        bars2 = ax_m.bar(x_idx + b_width/2, wh_summary["total_stock"], width=b_width, color="#7c3aed", alpha=0.85, label="Total Stock on Hand (Units)")
+
+        ax_m.set_xticks(x_idx)
+        ax_m.set_xticklabels(wh_summary["warehouse_id"], color="#cbd5e1", fontsize=10, fontweight="bold")
+        ax_m.set_ylabel("Units", color="#cbd5e1", fontsize=10, fontweight="bold")
+        ax_m.set_title("Network Warehouse Balance: Monthly Demand vs Stock on Hand", color="#00d4ff", fontsize=12, fontweight="bold", pad=12)
+        ax_m.legend(loc="upper right", fontsize=9, framealpha=0.35, facecolor="#0f172a", edgecolor="#334155", labelcolor="#e2e8f0")
+        ax_m.grid(True, axis="y", alpha=0.15, linestyle="--")
+        for sp in ax_m.spines.values(): sp.set_color("#334155")
+
+        # Annotate coverage days above bars
+        for idx_w, dos_v in enumerate(wh_summary["dos"]):
+            badge_color = "#ef4444" if dos_v < 30 else ("#38bdf8" if dos_v > 120 else "#10b981")
+            max_y = max(wh_summary["total_demand"].iloc[idx_w], wh_summary["total_stock"].iloc[idx_w])
+            ax_m.annotate(
+                f"{dos_v:.0f}d coverage",
+                xy=(idx_w, max_y),
+                xytext=(idx_w, max_y + max_y * 0.04),
+                ha="center", fontsize=8.5, fontweight="bold", color=badge_color,
+                bbox=dict(boxstyle="round,pad=0.25", fc="#0f172a", ec=badge_color, alpha=0.8)
+            )
+
+        plt.tight_layout()
+        show_fig(fig_m)
+
+        # Macro warehouse data table
+        st.markdown("<div style='font-size:12px; font-weight:700; color:#94a3b8; margin-top:8px;'>📋 Warehouse Network Balance Summary Table:</div>", unsafe_allow_html=True)
+        tbl_wh = wh_summary.copy()
+        tbl_wh["total_demand"] = tbl_wh["total_demand"].map(lambda x: f"{x:,.0f} u")
+        tbl_wh["total_stock"]  = tbl_wh["total_stock"].map(lambda x: f"{x:,.0f} u")
+        tbl_wh["total_val"]    = tbl_wh["total_val"].map(lambda x: fmt_curr(x, compact=True))
+        tbl_wh["dos"]          = tbl_wh["dos"].map(lambda x: f"{x:.0f} days")
+        tbl_wh.columns = ["Warehouse", "Monthly Demand", "Stock on Hand", "Inventory Value", "HOT Deficits", "COLD Surpluses", "Stock Runway"]
+        st.dataframe(tbl_wh, use_container_width=True, hide_index=True)
 
     st.markdown("---")
 
