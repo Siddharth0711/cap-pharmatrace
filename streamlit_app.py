@@ -2902,80 +2902,8 @@ elif selected_page == "🌐 Network Rebalancing & Transfers":
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Part B: Quadrant Scatter Plot ─────────────────────────────────────────
-    st.markdown("<div style='font-size:14px; font-weight:700; color:#38bdf8; margin: 20px 0 8px;'>🎯 Part B: Demand vs Stock Coverage Quadrant Matrix</div>", unsafe_allow_html=True)
-    fig_sc, ax_sc = plt.subplots(figsize=(13, 6.2))
-    fig_sc.patch.set_facecolor("#0f1117")
-    ax_sc.set_facecolor("#131722")
-
-    max_dem = max(geo["avg_monthly_demand"].max() * 1.05, 100)
-    max_dos = 205
-    med_dem = geo["avg_monthly_demand"].median()
-
-    # Shaded risk zones
-    ax_sc.fill_between([med_dem, max_dem], 0, 30, color="#ef4444", alpha=0.10)
-    ax_sc.fill_between([0, med_dem], 120, max_dos, color="#38bdf8", alpha=0.10)
-    ax_sc.fill_between([0, max_dem], 30, 120, color="#10b981", alpha=0.06)
-
-    # Threshold lines
-    ax_sc.axhline(30, color="#ef4444", lw=1.6, linestyle="--", alpha=0.8, label="30d Stock Floor (Stockout Danger)")
-    ax_sc.axhline(120, color="#38bdf8", lw=1.6, linestyle="--", alpha=0.8, label="120d Surplus Ceiling (Capital Trap)")
-    ax_sc.axvline(med_dem, color="#64748b", lw=1.2, linestyle=":", alpha=0.6, label=f"Median Demand ({med_dem:,.0f}u)")
-
-    # Scatter points
-    for ltype, color, marker, lbl in [
-        ("🔥 HOT", "#ef4444", "^", f"HOT Stockout Exposure (n={len(hot)})"),
-        ("❄️ COLD", "#38bdf8", "v", f"COLD Capital Trap (n={len(cold)})"),
-        ("✅ BALANCED", "#10b981", "o", f"Balanced Inventory (n={len(geo) - len(hot) - len(cold)})")
-    ]:
-        sub_pts = geo[geo["location_type"] == ltype]
-        if not sub_pts.empty:
-            ax_sc.scatter(
-                sub_pts["avg_monthly_demand"], sub_pts["days_of_stock"].clip(upper=200),
-                c=color, marker=marker, s=85, alpha=0.85, edgecolors="#ffffff25", label=lbl
-            )
-
-    # Outlier Callouts
-    hot_outs = geo[geo["location_type"] == "🔥 HOT"].sort_values("avg_monthly_demand", ascending=False).head(3)
-    for _, row in hot_outs.iterrows():
-        ax_sc.annotate(
-            f"{str(row['product_name'])[:15]}\n({row['warehouse_id']}: {int(row['days_of_stock'])}d)",
-            xy=(row["avg_monthly_demand"], min(row["days_of_stock"], 200)),
-            xytext=(max(row["avg_monthly_demand"] - 45, 10), min(row["days_of_stock"], 200) + 16),
-            bbox=dict(boxstyle="round,pad=0.3", fc="#2a1010", ec="#ef4444", alpha=0.9),
-            arrowprops=dict(arrowstyle="->", color="#ef4444", lw=1.2),
-            fontsize=7.5, color="#fca5a5", fontweight="bold"
-        )
-
-    cold_outs = geo[geo["location_type"] == "❄️ COLD"].sort_values("days_of_stock", ascending=False).head(3)
-    for _, row in cold_outs.iterrows():
-        ax_sc.annotate(
-            f"{str(row['product_name'])[:15]}\n({row['warehouse_id']}: {int(min(row['days_of_stock'], 200))}d)",
-            xy=(row["avg_monthly_demand"], min(row["days_of_stock"], 200)),
-            xytext=(row["avg_monthly_demand"] + 20, min(row["days_of_stock"], 200) - 18),
-            bbox=dict(boxstyle="round,pad=0.3", fc="#0d2138", ec="#38bdf8", alpha=0.9),
-            arrowprops=dict(arrowstyle="->", color="#38bdf8", lw=1.2),
-            fontsize=7.5, color="#7dd3fc", fontweight="bold"
-        )
-
-    # Zone watermark labels
-    ax_sc.text(max_dem * 0.72, 10, "HIGH DEMAND / DEFICIT (HOT RISK)", color="#ef444466", fontsize=9, fontweight="bold")
-    ax_sc.text(10, 185, "SURPLUS / CAPITAL TRAP (COLD)", color="#38bdf866", fontsize=9, fontweight="bold")
-    ax_sc.text(10, 70, "BALANCED ZONE (30–120 DAYS)", color="#10b98155", fontsize=9, fontweight="bold")
-
-    ax_sc.set_xlabel("Average Monthly Demand (Units / Month)", color="#cbd5e1", fontsize=10, fontweight="bold")
-    ax_sc.set_ylabel("Days of Stock (DOS Runway)", color="#cbd5e1", fontsize=10, fontweight="bold")
-    ax_sc.set_title("Network SKU Demand vs Stock Runway Quadrant Matrix", color="#00d4ff", fontsize=12, fontweight="bold", pad=12)
-    ax_sc.set_ylim(-8, 210)
-    ax_sc.set_xlim(-5, max_dem)
-    ax_sc.legend(loc="upper right", fontsize=8.5, framealpha=0.35, facecolor="#0f172a", edgecolor="#334155", labelcolor="#e2e8f0")
-    ax_sc.grid(True, alpha=0.15, linestyle="--")
-    for sp in ax_sc.spines.values(): sp.set_color("#334155")
-    plt.tight_layout()
-    show_fig(fig_sc)
-
-    # ── Part C: SKU Risk Portfolio & Network Balance per Warehouse ───────────
-    st.markdown("<div style='font-size:14px; font-weight:700; color:#38bdf8; margin: 20px 0 8px;'>🏢 Part C: Warehouse SKU Risk Profile & Network Health</div>", unsafe_allow_html=True)
+    # ── Part B: SKU Risk Portfolio & Network Balance per Warehouse ───────────
+    st.markdown("<div style='font-size:14px; font-weight:700; color:#38bdf8; margin: 24px 0 8px;'>🏢 Part B: Warehouse SKU Risk Profile & Network Health</div>", unsafe_allow_html=True)
     st.caption("Distribution of active pharmaceutical SKUs by operational status across warehouses.")
 
     wh_summary = geo.groupby("warehouse_id").agg(
