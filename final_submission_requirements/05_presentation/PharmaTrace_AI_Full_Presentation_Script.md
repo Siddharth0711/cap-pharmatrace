@@ -124,6 +124,8 @@ manufacturing_orders    → production order quantities
 
 # SLIDE 6 — Solution Architecture
 
+> 📌 **Use diagram:** `07_complete_documentation/PharmaTrace_Solution_Architecture.jpg`
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    PHARMATRACE AI PLATFORM                       │
