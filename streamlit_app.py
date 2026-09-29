@@ -4718,14 +4718,14 @@ elif selected_page == "🔄 Reverse Logistics & Certified Disposal":
             help="Download complete audit manifest matching physical disposal events to certificate document IDs."
         )
 
-        st.markdown("#### 📜 Certified Destruction Manifest & Electronic Compliance Certificates")
-        st.caption("Reconciles physical destruction records with electronic destruction certificates in compliance with FDA 21 CFR §211.150 and EPA Hazardous Waste requirements.")
-        dsp_merged = dsp_df.copy()
-        if not doc_df.empty and "document_id" in doc_df.columns:
-            dsp_merged = dsp_merged.merge(doc_df[["document_id", "document_type", "document_url", "status"]], left_on="certificate_document_id", right_on="document_id", how="left")
+        with st.expander("📜 Certified Destruction Manifest & Electronic Compliance Certificates (Click to Expand)", expanded=False):
+            st.caption("Reconciles physical destruction records with electronic destruction certificates in compliance with FDA 21 CFR §211.150 and EPA Hazardous Waste requirements.")
+            dsp_merged = dsp_df.copy()
+            if not doc_df.empty and "document_id" in doc_df.columns:
+                dsp_merged = dsp_merged.merge(doc_df[["document_id", "document_type", "document_url", "status"]], left_on="certificate_document_id", right_on="document_id", how="left")
 
-        view_dsp_cols = [c for c in ["disposal_id", "disposal_no", "fp_batch_id", "warehouse_id", "disposal_reason", "quantity", "disposal_method", "certificate_document_id", "document_url", "disposal_date"] if c in dsp_merged.columns]
-        st.dataframe(dsp_merged[view_dsp_cols].head(250), use_container_width=True, hide_index=True)
+            view_dsp_cols = [c for c in ["disposal_id", "disposal_no", "fp_batch_id", "warehouse_id", "disposal_reason", "quantity", "disposal_method", "certificate_document_id", "document_url", "disposal_date"] if c in dsp_merged.columns]
+            st.dataframe(dsp_merged[view_dsp_cols].head(250), use_container_width=True, hide_index=True)
 
     # ─────────────────────────────────────────────────────────────────────────
     # TAB 2: RECALL ROOT-CAUSES, SUPPLY CHAIN STAGING & VALUE SAVED
@@ -4927,49 +4927,70 @@ elif selected_page == "🔄 Reverse Logistics & Certified Disposal":
 
         # ── 1. K-Means Clustering on Recall Reasons ──────────────────────────
         with col_km:
-            st.markdown("#### 🔬 K-Means Recall Defect Archetypes (NLP)")
-            st.caption("TF-IDF vectorization + K-Means (k=4) projected onto 2D Principal Component Space.")
+            st.markdown("#### 🔬 Recall Defect Archetype Breakdown (K-Means NLP)")
+            st.caption("TF-IDF vectorization + K-Means (k=4) auto-discovers 4 latent defect families from 3,000 FDA recall filings.")
 
             vec = TfidfVectorizer(max_features=50, stop_words="english")
             tfidf_mat = vec.fit_transform(recalls_df["reason_for_recall"].fillna("Quality Deviation"))
             km = KMeans(n_clusters=4, random_state=42, n_init=10)
             recalls_df["cluster"] = km.fit_predict(tfidf_mat)
 
-            pca = PCA(n_components=2, random_state=42)
-            coords = pca.fit_transform(tfidf_mat.toarray())
-
-            fig_km, ax_km = plt.subplots(figsize=(7.5, 5.2))
-            fig_km.patch.set_facecolor("#0f1117")
-            ax_km.set_facecolor("#131722")
-
             cluster_labels = {
                 0: "Sterile & Particulate (Class I)",
                 1: "Dissolution & Potency (Class II)",
                 2: "Packaging & Labeling (Class III)",
-                3: "Chemical Impurities/NDMA (Class II)"
+                3: "Chemical Impurities / NDMA (Class II)"
             }
             cluster_colors = ["#ef4444", "#f59e0b", "#10b981", "#38bdf8"]
+            cluster_actions = {
+                0: "Immediate sterility re-test + cleanroom inspection",
+                1: "In-process PAT dissolution assay + API vendor audit",
+                2: "Machine-vision barcode re-verification on carton line",
+                3: "HPLC impurity screen + API lot quarantine at receiving"
+            }
 
-            for cl_id in range(4):
-                mask = recalls_df["cluster"] == cl_id
-                ax_km.scatter(
-                    coords[mask, 0], coords[mask, 1],
-                    label=cluster_labels.get(cl_id, f"Cluster {cl_id}"),
-                    color=cluster_colors[cl_id], alpha=0.65, s=28, edgecolors="none"
-                )
+            # Count per cluster
+            cluster_series = recalls_df["cluster"].value_counts().sort_index()
+            cl_labels_list = [cluster_labels.get(i, f"Cluster {i}") for i in cluster_series.index]
+            cl_sizes = cluster_series.values.tolist()
 
-            # Centroids
-            centers_2d = pca.transform(km.cluster_centers_)
-            ax_km.scatter(centers_2d[:, 0], centers_2d[:, 1], color="#ffffff", marker="X", s=140, edgecolors="#000", label="Cluster Centroids")
+            fig_km, ax_km = plt.subplots(figsize=(7.5, 5.2))
+            fig_km.patch.set_facecolor("#0f1117")
+            ax_km.set_facecolor("#0f1117")
 
-            ax_km.set_title("2D PCA Projection of Recall Reason Clusters", color="#00d4ff", fontsize=11, fontweight="bold")
-            ax_km.set_xlabel("Principal Component 1", color="#94a3b8", fontsize=9)
-            ax_km.set_ylabel("Principal Component 2", color="#94a3b8", fontsize=9)
-            ax_km.legend(loc="upper right", fontsize=8, facecolor="#0f172a", edgecolor="#334155", labelcolor="#cbd5e1")
-            for sp in ax_km.spines.values(): sp.set_color("#334155")
-            ax_km.grid(True, alpha=0.15, linestyle="--")
+            wedges, texts, autotexts = ax_km.pie(
+                cl_sizes,
+                labels=None,
+                colors=cluster_colors,
+                autopct=lambda p: f"{p:.1f}%" if p > 5 else "",
+                startangle=140,
+                pctdistance=0.72,
+                wedgeprops=dict(width=0.55, edgecolor="#0f1117", linewidth=2)
+            )
+            for at in autotexts:
+                at.set_color("#ffffff"); at.set_fontsize(10); at.set_fontweight("bold")
+
+            legend_labels = [f"{cluster_labels.get(i, f'C{i}')} — {v:,} events" for i, v in zip(cluster_series.index, cl_sizes)]
+            ax_km.legend(wedges, legend_labels, loc="center left", bbox_to_anchor=(-0.22, 0.5),
+                         fontsize=8.5, facecolor="#1e293b", edgecolor="#334155", labelcolor="#cbd5e1")
+
+            ax_km.set_title("Recall Defect Archetypes (K-Means NLP Clustering)", color="#00d4ff", fontsize=11, fontweight="bold")
             plt.tight_layout()
             show_fig(fig_km)
+
+            # Actionable archetype cards
+            st.markdown("**Recommended Intercept Protocol per Defect Archetype:**")
+            for ci in range(4):
+                cnt = int((recalls_df["cluster"] == ci).sum())
+                pct = cnt / max(len(recalls_df), 1) * 100
+                st.markdown(
+                    f"<div style='background:#1e293b; border-left:4px solid {cluster_colors[ci]}; "
+                    f"padding:8px 12px; margin:4px 0; border-radius:5px; font-size:11.5px; color:#cbd5e1;'>"
+                    f"<b style='color:{cluster_colors[ci]};'>{cluster_labels[ci]}</b> — "
+                    f"<b>{cnt:,} events ({pct:.1f}%)</b><br>"
+                    f"<span style='color:#94a3b8;'>Action: {cluster_actions[ci]}</span></div>",
+                    unsafe_allow_html=True
+                )
 
         # ── 2. Manufacturing Anomaly Detection (Isolation Forest) ────────────
         with col_ano:
@@ -5087,21 +5108,21 @@ elif selected_page == "🔄 Reverse Logistics & Certified Disposal":
         bp3.metric("Training Batch Count", f"{len(df_b):,} Lots", "Full cGMP Genealogy")
         bp4.metric("Historical Recall Incident Rate", f"{(y_b.sum()/len(y_b)*100):.1f}%", f"{y_b.sum():,} Flagged Lots", delta_color="inverse")
 
-        # Feature Importance Plot
-        st.markdown("#### 🔬 What Features Drive New Batch Recalls? — Feature Importance")
-        st.caption("Relative weight of operational variables predicting whether a batch will suffer a future market recall:")
-        _fi_s = pd.Series(clf_batch.feature_importances_, index=X_b.columns).sort_values(ascending=False).head(10)
-        fig_bfi, ax_bfi = plt.subplots(figsize=(14, 4.2))
-        fig_bfi.patch.set_facecolor("#0f172a"); ax_bfi.set_facecolor("#0f172a")
-        _b_colors = ["#ef4444" if i < 3 else ("#f59e0b" if i < 6 else "#38bdf8") for i in range(len(_fi_s))]
-        bars_bfi = ax_bfi.barh(_fi_s.index[::-1], _fi_s.values[::-1], color=_b_colors[::-1], alpha=0.88, height=0.6)
-        for bar, val in zip(bars_bfi, _fi_s.values[::-1]):
-            ax_bfi.text(bar.get_width() + 0.003, bar.get_y() + bar.get_height()/2, f"{val:.1%}", va="center", color="#ffffff", fontsize=9, fontweight="bold")
-        ax_bfi.set_title("Top Batch Recall Predictors — Random Forest Feature Importance", color="#00d4ff", fontsize=11, fontweight="bold")
-        ax_bfi.set_xlabel("Relative Importance (%)", color="#94a3b8", fontsize=9)
-        ax_bfi.tick_params(colors="#94a3b8", labelsize=9)
-        for sp in ax_bfi.spines.values(): sp.set_color("#334155")
-        plt.tight_layout(); show_fig(fig_bfi)
+        # Feature Importance Plot — collapsed for management view
+        with st.expander("🔬 Model Technical Details — Feature Importance & Training Diagnostics", expanded=False):
+            st.caption("Relative weight of operational variables predicting whether a batch will suffer a future market recall:")
+            _fi_s = pd.Series(clf_batch.feature_importances_, index=X_b.columns).sort_values(ascending=False).head(10)
+            fig_bfi, ax_bfi = plt.subplots(figsize=(14, 4.2))
+            fig_bfi.patch.set_facecolor("#0f172a"); ax_bfi.set_facecolor("#0f172a")
+            _b_colors = ["#ef4444" if i < 3 else ("#f59e0b" if i < 6 else "#38bdf8") for i in range(len(_fi_s))]
+            bars_bfi = ax_bfi.barh(_fi_s.index[::-1], _fi_s.values[::-1], color=_b_colors[::-1], alpha=0.88, height=0.6)
+            for bar, val in zip(bars_bfi, _fi_s.values[::-1]):
+                ax_bfi.text(bar.get_width() + 0.003, bar.get_y() + bar.get_height()/2, f"{val:.1%}", va="center", color="#ffffff", fontsize=9, fontweight="bold")
+            ax_bfi.set_title("Top Batch Recall Predictors — Random Forest Feature Importance", color="#00d4ff", fontsize=11, fontweight="bold")
+            ax_bfi.set_xlabel("Relative Importance (%)", color="#94a3b8", fontsize=9)
+            ax_bfi.tick_params(colors="#94a3b8", labelsize=9)
+            for sp in ax_bfi.spines.values(): sp.set_color("#334155")
+            plt.tight_layout(); show_fig(fig_bfi)
 
         # ── INTERACTIVE NEW BATCH RECALL SIMULATOR ────────────────────────────
         st.markdown("#### 🧪 Interactive New Batch Recall Risk Simulator")
@@ -5224,7 +5245,6 @@ elif selected_page == "🔄 Reverse Logistics & Certified Disposal":
         clf_dsp = RandomForestClassifier(n_estimators=100, max_depth=8, random_state=42, n_jobs=-1)
         clf_dsp.fit(X_tr_d, y_tr_d)
         y_pred_d = clf_dsp.predict(X_te_d)
-        acc_dsp = accuracy_score(y_te_d, y_pred_d) * 100
 
         _dsp_method_counts = y_dsp.value_counts()
         _primary_method = _dsp_method_counts.index[0].replace("_"," ").title() if len(_dsp_method_counts) > 0 else "Incineration"
@@ -5232,25 +5252,9 @@ elif selected_page == "🔄 Reverse Logistics & Certified Disposal":
         _witn_cnt       = int(y_dsp.str.contains("witnessed", case=False, na=False).sum())
         _witn_pct       = _witn_cnt / max(len(y_dsp), 1) * 100
 
-        d_c1, d_c2, d_c3 = st.columns(3)
-        d_c1.metric("Disposal Routing Accuracy", f"{acc_dsp:.1f}%", f"↑ Enriched ({len(X_dsp.columns)} features)")
-        d_c2.metric("Primary Method", f"{_primary_method} ({_primary_pct:.1f}%)", "High-temperature destruction")
-        d_c3.metric("Witnessed DEA Method", f"{_witn_cnt:,} Runs ({_witn_pct:.1f}%)", "Schedule II Controlled Narcotics")
-
-        # Feature importance for Disposal Routing
-        st.markdown("#### 🔬 What Drives Disposal Method Selection? — Feature Importance")
-        _dsp_fi = pd.Series(clf_dsp.feature_importances_, index=X_dsp.columns).sort_values(ascending=False).head(10)
-        fig_dfi, ax_dfi = plt.subplots(figsize=(14, 4))
-        fig_dfi.patch.set_facecolor("#0f172a"); ax_dfi.set_facecolor("#0f172a")
-        _dfi_clrs = ["#7c3aed" if i < 3 else ("#f59e0b" if i < 6 else "#334155") for i in range(len(_dsp_fi))]
-        ax_dfi.barh(_dsp_fi.index[::-1], _dsp_fi.values[::-1], color=_dfi_clrs[::-1], alpha=0.88, height=0.6)
-        for bar, val in zip(ax_dfi.patches, _dsp_fi.values[::-1]):
-            ax_dfi.text(bar.get_width() + 0.002, bar.get_y() + bar.get_height()/2, f"{val:.1%}", va="center", color="white", fontsize=9, fontweight="bold")
-        ax_dfi.set_title("EPA/DEA Disposal Route Predictors — RF Feature Importance", color="#00d4ff", fontsize=11, fontweight="bold")
-        ax_dfi.set_xlabel("Feature Importance (%)", color="#94a3b8", fontsize=9)
-        ax_dfi.tick_params(colors="#94a3b8", labelsize=9)
-        for sp in ax_dfi.spines.values(): sp.set_color("#334155")
-        plt.tight_layout(); show_fig(fig_dfi)
+        d_c1, d_c2 = st.columns(2)
+        d_c1.metric("Primary Destruction Method", f"{_primary_method} ({_primary_pct:.1f}%)", "EPA RCRA high-temperature destruction")
+        d_c2.metric("Witnessed DEA Runs", f"{_witn_cnt:,} ({_witn_pct:.1f}%)", "Schedule II Controlled Substance Protocol")
 
         # Interactive Disposal Recommender
         st.markdown("#### 🧪 Prescriptive Disposal Method Recommender")
